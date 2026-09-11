@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -10,8 +11,11 @@ from typing import Any, Iterator
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-I18N_ROOT = REPO_ROOT / 'i18n'
+TRANSLATIONS_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(os.environ.get('GUARDIAN_PRODUCT_ROOT', TRANSLATIONS_ROOT)).resolve()
+I18N_ROOT = Path(
+    os.environ.get('GUARDIAN_I18N_ROOT', TRANSLATIONS_ROOT / 'i18n')
+).resolve()
 SERVICES = ('server', 'agent', 'extension')
 DEFAULT_LOCALE = 'en'
 PLACEHOLDER_RE = re.compile(r'\{(\w+)\}')
@@ -302,9 +306,15 @@ def validate_catalogs(*, strict: bool = False) -> list[str]:
 
 def android_values_dir(locale: str) -> Path:
     code = locale.split('-', 1)[0]
+    android_root = Path(
+        os.environ.get(
+            'GUARDIAN_ANDROID_ROOT',
+            REPO_ROOT / 'agent-android' if (REPO_ROOT / 'agent-android').exists() else REPO_ROOT,
+        )
+    )
     if code == DEFAULT_LOCALE:
-        return REPO_ROOT / 'android-agent' / 'app' / 'src' / 'main' / 'res' / 'values'
-    return REPO_ROOT / 'android-agent' / 'app' / 'src' / 'main' / 'res' / f'values-{code}'
+        return android_root / 'app' / 'src' / 'main' / 'res' / 'values'
+    return android_root / 'app' / 'src' / 'main' / 'res' / f'values-{code}'
 
 
 def android_string_name(key: str) -> str:
@@ -416,14 +426,33 @@ def list_missing_keys(locale: str, service: str = 'server') -> list[str]:
     return sorted(set(canonical) - set(localized))
 
 
-OVERLAY_RESOURCE_DIRS = (
-    REPO_ROOT / 'agent' / 'overlay_resources',
-    REPO_ROOT / 'extension',
-    REPO_ROOT / 'android-agent' / 'app' / 'src' / 'main' / 'assets',
+OVERLAY_RESOURCE_DIRS = tuple(
+    Path(path)
+    for path in (
+        os.environ.get('GUARDIAN_OVERLAY_ROOT', str(REPO_ROOT / 'agent-common' / 'overlay_resources')),
+        os.environ.get('GUARDIAN_EXTENSION_ROOT', str(REPO_ROOT / 'extension')),
+        str(
+            Path(
+                os.environ.get(
+                    'GUARDIAN_ANDROID_ROOT',
+                    REPO_ROOT / 'agent-android' if (REPO_ROOT / 'agent-android').exists() else REPO_ROOT,
+                )
+            )
+            / 'app'
+            / 'src'
+            / 'main'
+            / 'assets'
+        ),
+    )
 )
 
 BLOCKED_HTML_NAME = 'blockedv2.html'
-RUST_I18N_DIR = REPO_ROOT / 'agent' / 'resources' / 'i18n'
+RUST_I18N_DIR = Path(
+    os.environ.get(
+        'GUARDIAN_RUST_I18N_ROOT',
+        REPO_ROOT / 'agent-common' / 'resources' / 'i18n',
+    )
+)
 
 
 def _js_string(value: str) -> str:

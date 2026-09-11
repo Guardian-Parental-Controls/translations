@@ -59,6 +59,7 @@ ANDROID_XML_TEXT_ATTR_RE = re.compile(
 KOTLIN_HARDCODED_UI_RE = re.compile(
     r'(?:\.text|setText\(|setContentTitle\(|setContentText\(|Snackbar\.make\([^,]+,\s*)\s*"([^"]{4,})"',
 )
+RUST_I18N_RE = re.compile(r'\b(?:i18n::)?t(?:_fmt)?\(\s*"([^"]+)"')
 
 ANDROID_SKIP_PATH_RE = re.compile(
     r'(?:^|/)values(?:-[\w-]+)?/strings\.xml$|/uniffi/|/build/|/src/test/',
@@ -66,7 +67,9 @@ ANDROID_SKIP_PATH_RE = re.compile(
 
 
 def _android_root() -> Path:
-    return REPO_ROOT / 'android-agent' / 'app' / 'src' / 'main'
+    monorepo_root = REPO_ROOT / 'agent-android'
+    android_root = monorepo_root if monorepo_root.exists() else REPO_ROOT
+    return android_root / 'app' / 'src' / 'main'
 
 # ── Hardcoded string patterns ─────────────────────────────────────────────────
 
@@ -206,6 +209,10 @@ def _load_agent_string_keys() -> set[str]:
     if not isinstance(strings, dict):
         return set()
     return {key for key, value in strings.items() if isinstance(value, str)}
+
+
+def _load_agent_keys() -> set[str]:
+    return {key for key, _value in iter_leaf_strings(load_catalog(DEFAULT_LOCALE, 'agent'))}
 
 
 def _agent_catalog_key(resource_name: str) -> str:
@@ -491,6 +498,30 @@ def collect_key_references(changed_only: set[str] | None = None) -> list[KeyRefe
                 continue
             _scan_android_xml_keys(path, path.read_text(encoding='utf-8'), refs, seen)
 
+    rust_roots = tuple(
+        root
+        for root in (
+            REPO_ROOT / 'agent-common',
+            REPO_ROOT / 'agent-linux',
+            REPO_ROOT / 'agent-windows',
+            REPO_ROOT / 'src',
+        )
+        if root.is_dir()
+    )
+    for path in _filter_paths(_iter_files(('*.rs',), rust_roots), changed_only):
+        content = path.read_text(encoding='utf-8')
+        for match in RUST_I18N_RE.finditer(content):
+            key = match.group(1)
+            _add_key_ref(
+                refs,
+                seen,
+                key=key,
+                path=path,
+                line=_line_number(content, match.start()),
+                service='agent',
+                catalog_key=f'desktop.{key}',
+            )
+
     return refs
 
 
@@ -546,7 +577,7 @@ def collect_hardcoded_strings(changed_only: set[str] | None = None) -> list[Hard
 def validate_references(refs: list[KeyReference]) -> list[KeyReference]:
     server_keys = _load_server_keys()
     extension_keys = _load_extension_keys()
-    agent_keys = _load_agent_string_keys()
+    agent_keys = _load_agent_keys()
     missing: list[KeyReference] = []
 
     for ref in refs:
